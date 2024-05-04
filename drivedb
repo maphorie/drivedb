@@ -1,0 +1,137 @@
+#!/usr/bin/env perl
+
+use strict;
+use warnings;
+use DBI;
+use Getopt::Std qw( getopts );
+
+sub print_rows {
+  my $sth = shift;
+
+  while ( my $hashref = $sth->fetchrow_hashref ) {
+    my $id       = $hashref->{id};
+    my $vendor   = $hashref->{vendor};
+    my $model    = $hashref->{model};
+    my $serial   = $hashref->{serial};
+    my $warranty = $hashref->{warranty};
+
+    my $message = sprintf '%2d  %-18s  %-19s  %-18s', $id, $vendor, $model, $serial;
+    if ( defined $warranty ) {
+      $message .= sprintf '  %s', $warranty;
+    }
+
+    print "$message\n";
+  }
+}
+
+sub list {
+  my $dbh = shift;
+
+  my $sth = $dbh->prepare( 'SELECT id, vendor, model, serial, warranty FROM drives ORDER BY id' ) or die $dbh->errstr;
+
+  $sth->execute or die $sth->errstr;
+
+  &print_rows( $sth );
+}
+
+sub search {
+  my ( $dbh, $field, $query ) = @_;
+
+  unless ( defined $field ) {
+    print STDERR "field or query must be specified\n";
+    return;
+  }
+
+  unless ( defined $query ) {
+    $query = $field;
+    $field = ( $field =~ m/\A\d+\Z/ ) ? 'id' : 'serial';
+  }
+
+  my $statement = sprintf 'SELECT id, vendor, model, serial, warranty FROM drives WHERE %s = ? ORDER BY id', $field;
+
+  my $sth = $dbh->prepare( $statement ) or die $dbh->errstr;
+
+  $sth->execute( $query ) or die $sth->errstr;
+
+  &print_rows( $sth );
+}
+
+sub add {
+  my ( $dbh, $vendor, $model, $serial, $warranty ) = @_;
+
+  unless ( defined $vendor && defined $model && defined $serial ) {
+    print STDERR "vendor, model and serial must be specified\n";
+    return;
+  }
+
+  my $sth = $dbh->prepare( 'INSERT INTO drives ( vendor, model, serial, warranty ) VALUES ( ?, ?, ?, ? )' )
+    or die $dbh->errstr;
+
+  $sth->execute( $vendor, $model, $serial, $warranty ) or die $sth->errstr;
+  $sth->finish;
+}
+
+sub delete {
+  my ( $dbh, $id ) = @_;
+
+  unless ( defined $id ) {
+    print STDERR "id must be specified\n";
+    return;
+  }
+
+  my $sth = $dbh->prepare( 'DELETE FROM drives WHERE id = ?' ) or die $dbh->errstr;
+
+  $sth->execute( $id ) or die $sth->errstr;
+  $sth->finish;
+}
+
+sub update {
+  my ( $dbh, $old_id, $id, $vendor, $model, $serial, $warranty ) = @_;
+
+  unless ( defined $old_id && defined $id && defined $vendor && defined $model && defined $serial ) {
+    print STDERR "old_id, id, vendor, model and serial must be specified\n";
+    return;
+  }
+
+  my $sth = $dbh->prepare( 'UPDATE drives SET id = ?, vendor = ?, model = ?, serial = ?, warranty = ? WHERE id = ?' )
+    or die $dbh->errstr;
+
+  $sth->execute( $id, $vendor, $model, $serial, $warranty, $old_id ) or die $sth->errstr;
+  $sth->finish;
+}
+
+my %dispatch_table = ( list   => \&list,
+                       l      => \&list,
+                       search => \&search,
+                       s      => \&search,
+                       add    => \&add,
+                       a      => \&add,
+                       delete => \&delete,
+                       d      => \&delete,
+                       update => \&update,
+                       u      => \&update );
+
+my %opts;
+getopts( 'h:P:u:p:d:', \%opts );
+my $host     = $opts{h};
+my $port     = $opts{P};
+my $user     = $opts{u};
+my $password = $opts{p};
+my $database = $opts{d};
+
+unless ( defined $host && defined $port && defined $user && defined $password && defined $database ) {
+  print STDERR "host(-h), port(-P), user(-u), password(-p) and database(-d) must be specified\n";
+  exit 1;
+}
+
+my $dbh = DBI->connect( "dbi:mysql:host=$host;port=$port;database=$database", $user, $password ) or die $DBI::errstr;
+
+my $command = ( @ARGV < 1 ) ? 'list' : shift;
+if ( exists $dispatch_table{$command} ) {
+  $dispatch_table{$command}->( $dbh, @ARGV );
+} else {
+  unshift @ARGV, $command;
+  $dispatch_table{search}( $dbh, @ARGV );
+}
+
+$dbh->disconnect;
