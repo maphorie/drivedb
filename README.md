@@ -1,5 +1,7 @@
 # drivedb
 
+[![License](https://img.shields.io/github/license/maphorie/drivedb)](https://github.com/maphorie/drivedb/blob/main/LICENSE)
+
 ストレージデバイスをMySQLデータベースで管理します．
 
 ## 必要なパッケージ
